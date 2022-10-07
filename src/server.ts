@@ -49,9 +49,9 @@ app.use('/docs', swaggerUI.serve, swaggerUI.setup(swaggerJsDoc(swaggerOptions)))
 server.applyMiddleware({ app, path: '/graphql' });
 
 const httpServer = createServer(app);
+const port = process.env.PORT || 4000;
 
 httpServer.listen({ port: process.env.PORT }, (): void => {
-  const port = process.env.PORT || 4000;
   console.log(`\n🚀 Swagger is now running on http://localhost:${port}/docs`);
   console.log(`\n🚀 GraphQL is now running on http://localhost:${port}/graphql`);
 });
