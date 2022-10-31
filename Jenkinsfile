@@ -48,6 +48,9 @@ pipeline {
                             terraform apply \
                                -var="app_env=${APP_ENV}"\
                                --auto-approve
+                            terraform destroy \
+                               -var="app_env=${APP_ENV}"\
+                               --auto-approve
                         '''
                     
                 }
