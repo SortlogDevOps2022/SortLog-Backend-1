@@ -42,9 +42,6 @@ pipeline {
                    
                     
                         sh '''
-                            export APP_ENV="Production"
-                            terraform init -input=false
-                            terraform workspace select ${APP_ENV} || terraform workspace new ${APP_ENV}
                             terraform destroy \
                                -var="app_env=${APP_ENV}"\
                                --auto-approve
