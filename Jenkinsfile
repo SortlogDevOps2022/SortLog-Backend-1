@@ -55,7 +55,7 @@ pipeline {
         }
         stage('Deliver for UAT') {
             when {
-                branch 'UAT--lina'
+                branch 'Main'
             }
 
             steps {
