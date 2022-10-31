@@ -42,6 +42,7 @@ pipeline {
                    
                     
                         sh '''
+                            terraform init
                             terraform destroy \
                                -var="app_env=${APP_ENV}"\
                                --auto-approve
