@@ -23,7 +23,7 @@ resource "aws_subnet" "private" {
   availability_zone = data.aws_availability_zones.available.names[count.index]
   count             = var.az_count
   tags = {
-     Name = "${var.stack}-private subnet"
+     Name = "${var.stack}-private subnet-${var.app_env}"
   }
 }
  
@@ -33,7 +33,7 @@ resource "aws_subnet" "public" {
   availability_zone       = data.aws_availability_zones.available.names[count.index]
   count                   = var.az_count
   tags = {
-     Name = "${var.stack}-private subnet"
+     Name = "${var.stack}-private subnet-${var.app_env}"
   }
   map_public_ip_on_launch = true //instance in public subnet will have public IP 
 }
@@ -41,7 +41,7 @@ resource "aws_subnet" "public" {
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
   tags = {
-     Name = "${var.stack}-internetGateway"
+     Name = "${var.stack}-internetGateway-${var.app_env}"
   }
 }
 ##
@@ -57,6 +57,9 @@ resource "aws_eip" "gw" {
   count      = var.az_count
   vpc        = true
   depends_on = [aws_internet_gateway.main]
+  # tags = {
+  #    Name = "${var.stack}-eip-${var.app_env}"
+  # } 
 }
 
 resource "aws_nat_gateway" "gw" {
@@ -64,7 +67,7 @@ resource "aws_nat_gateway" "gw" {
   subnet_id     = element(aws_subnet.public.*.id, count.index)
   allocation_id = element(aws_eip.gw.*.id, count.index)
   tags = {
-     Name = "${var.stack}-NATsortlog"
+     Name = "${var.stack}-NAT-${var.app_env}"
   }
 }
 
@@ -78,7 +81,7 @@ resource "aws_route_table" "private" {
     nat_gateway_id = element(aws_nat_gateway.gw.*.id, count.index)
   }
   tags = {
-     Name = "${var.stack}-privateRoutetablesortlog"
+     Name = "${var.stack}-private route table-${var.app_env}"
   }
 
 }
@@ -88,6 +91,8 @@ resource "aws_route_table_association" "private" {
   count          = var.az_count
   subnet_id      = element(aws_subnet.private.*.id, count.index)
   route_table_id = element(aws_route_table.private.*.id, count.index)
+
+
 }
 
 
@@ -113,12 +118,7 @@ resource "aws_security_group" "lb" {
    cidr_blocks      = ["0.0.0.0/0"]
    ipv6_cidr_blocks = ["::/0"]
   }
-  # ingress {
-  #   protocol    = "tcp"
-  #   from_port   = var.container_port
-  #   to_port     = var.container_port
-  #   cidr_blocks = ["0.0.0.0/0"]
-  # }
+  
   egress {
     protocol    = "-1"
     from_port   = 0
@@ -126,7 +126,7 @@ resource "aws_security_group" "lb" {
     cidr_blocks = ["0.0.0.0/0"]
   }
   tags = {
-     Name = "${var.stack}-sg"
+     Name = "${var.stack}-sgalb-${var.app_env}"
   }
 }
 #Traffic to the ECS cluster should only come from the ALB
@@ -148,6 +148,9 @@ resource "aws_security_group" "ecs_tasks" {
    cidr_blocks      = ["0.0.0.0/0"]
    ipv6_cidr_blocks = ["::/0"]
   }
+  tags = {
+     Name = "${var.stack}-sgecs-${var.app_env}"
+  }
 }
 
 ################Create a load balancer #################
@@ -157,6 +160,9 @@ resource "aws_alb" "main" {
   security_groups = [aws_security_group.lb.id]
   load_balancer_type = "application"
   enable_deletion_protection = false
+  tags = {
+     Name = "${var.stack}-alb-${var.app_env}"
+  }
 }
 
 resource "aws_alb_target_group" "app" {
@@ -175,6 +181,9 @@ resource "aws_alb_target_group" "app" {
     path                = var.health_check_path //route path / is alive or not 
     unhealthy_threshold = "2"
   }
+  tags = {
+     Name = "${var.stack}-albtarget-${var.app_env}"
+  }
 }
 
 # Redirect all traffic from the ALB to the target group alb listener 
@@ -192,6 +201,9 @@ resource "aws_alb_listener" "http" {
      status_code = "HTTP_301"
    }
   }
+  tags = {
+     Name = "${var.stack}-http-${var.app_env}"
+  } 
 }
 resource "aws_alb_listener" "back_end" {
   load_balancer_arn = aws_alb.main.id
@@ -205,15 +217,18 @@ resource "aws_alb_listener" "back_end" {
     target_group_arn = aws_alb_target_group.app.id
     type             = "forward"
   }
+  tags = {
+     Name = "${var.stack}-backend-${var.app_env}"
+  } 
 }
 
 #############################ECS container service #############################
 resource "aws_ecs_cluster" "main" {
-  name = "test20221024"
+  name = "${var.stack}-sortlogcluster-${var.app_env}"
 }
 
 resource "aws_ecs_task_definition" "main" {
-  family                   = "demotask"
+  family                   = "${var.stack}-sortlogtask-${var.app_env}"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   cpu                      = var.fargate_cpu
@@ -221,8 +236,8 @@ resource "aws_ecs_task_definition" "main" {
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
   task_role_arn            = aws_iam_role.ecs_task_role.arn
   container_definitions = jsonencode([{
-    name        = "democontainer"
-    image       = "${var.container_image}:latest"
+    name        = "${var.stack}-sortlogcontainer-${var.app_env}"
+    image       = "${aws_ecr_repository.sortlog.repository_url}:latest" //"${var.container_image}:latest"//// //
     essential   = true
     environment= [
       {"name": "auth_encryption_salt", "value": "some-salt"},
@@ -236,12 +251,12 @@ resource "aws_ecs_task_definition" "main" {
     logConfiguration = {
       logDriver = "awslogs"
       options = {
-        awslogs-group         = "/ecs/demo-sortlog"
+        awslogs-group         = "ecs/${var.stack}-sortlogloggroup-${var.app_env}"
         awslogs-stream-prefix = "ecs"
         awslogs-region        = "ap-southeast-2"// change to your 
       }
     }
-#     secrets = var.container_secrets
+    secrets : [{"name": "MONGO_URL", "valueFrom": "arn:aws:ssm:ap-southeast-2:003374733998:parameter/MONGO_URL"}]
   }])
 
 #   tags = {
@@ -251,7 +266,7 @@ resource "aws_ecs_task_definition" "main" {
 }
 
 resource "aws_ecs_service" "main" {
- name                               = "service"
+ name                               = "${var.stack}-sortlogservice-${var.app_env}"
  cluster                            = aws_ecs_cluster.main.id
  task_definition                    = aws_ecs_task_definition.main.arn
  desired_count                      = 2
@@ -268,7 +283,7 @@ resource "aws_ecs_service" "main" {
  
  load_balancer {
    target_group_arn = aws_alb_target_group.app.id
-   container_name   = "democontainer"
+   container_name   = "${var.stack}-sortlogcontainer-${var.app_env}"
    container_port   = var.container_port
  }
  
@@ -277,7 +292,7 @@ resource "aws_ecs_service" "main" {
 
 #IAM role for ECS 
 resource "aws_iam_role" "ecs_task_execution_role" {
-  name = "demoapp-decsTaskExecutionRole"
+  name = "${var.stack}-sortlogservice-${var.app_env}-decsTaskExecutionRole"
 
   assume_role_policy = <<EOF
 {
@@ -296,7 +311,7 @@ resource "aws_iam_role" "ecs_task_execution_role" {
 EOF
 }
 resource "aws_iam_role" "ecs_task_role" {
-  name = "demoapp-ecsTaskRole"
+  name = "${var.stack}-sortlogservice-${var.app_env}-ecsTaskRole"
 
   assume_role_policy = <<EOF
 {
@@ -314,14 +329,41 @@ resource "aws_iam_role" "ecs_task_role" {
 }
 EOF
 }
+resource "aws_iam_policy" "policy" {
+  name        = "${var.stack}-ssmpolicy-${var.app_env}"
+  description = "ssm secret system manager policy"
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetParameters",
+        "secretsmanager:GetSecretValue"
+      ],
+      "Resource": [
+        "arn:aws:ssm:ap-southeast-2:003374733998:parameter/MONGO_URL",
+        "arn:aws:secretsmanager:ap-southeast-2:003374733998:secret:MONGO_URL*"
+      ]
+    }
+  ]
+}
+EOF
+}
 resource "aws_iam_role_policy_attachment" "ecs-task-execution-role-policy-attachment" {
   role       = aws_iam_role.ecs_task_execution_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
+resource "aws_iam_role_policy_attachment" "ssm-attach" {
+  role       = aws_iam_role.ecs_task_execution_role.name
+  policy_arn = aws_iam_policy.policy.arn
+}
 
 #IAM role for autoscaling 
 resource "aws_iam_role" "ecs_auto_scale_role" {
-  name               = "demoapp-ecs_auto_scale_role_name"
+  name               = "${var.stack}-sortlogservice-${var.app_env}-ecs_auto_scale_role_name"
   assume_role_policy = <<EOF
 {
   "Version": "2012-10-17",
@@ -357,7 +399,7 @@ resource "aws_appautoscaling_target" "target" {
 # Automatically scale capacity up by one
 
 resource "aws_appautoscaling_policy" "up" {
-  name               = "scale_up-demo"
+  name               = "scale_up-${var.stack}-sortlogservice-${var.app_env}"
   service_namespace  = "ecs"
   resource_id        = aws_appautoscaling_target.target.resource_id//"service/${aws_ecs_cluster.main.name}/${aws_ecs_service.main.name}"
   scalable_dimension = aws_appautoscaling_target.target.scalable_dimension//"ecs:service:DesiredCount"
@@ -378,7 +420,7 @@ resource "aws_appautoscaling_policy" "up" {
 # Automatically scale capacity down by one
 
 resource "aws_appautoscaling_policy" "down" {
-  name               = "scale_down-demo"
+  name               = "scale_down-${var.stack}-sortlogservice-${var.app_env}"
   service_namespace  = "ecs"
   resource_id        = aws_appautoscaling_target.target.resource_id//"service/${aws_ecs_cluster.main.name}/${aws_ecs_service.main.name}"
   scalable_dimension = aws_appautoscaling_target.target.scalable_dimension//"ecs:service:DesiredCount"
@@ -396,71 +438,71 @@ resource "aws_appautoscaling_policy" "down" {
 }
 
 # CloudWatch alarm that triggers the autoscaling up policy
-# resource "aws_cloudwatch_metric_alarm" "service_cpu_high" {
-#   alarm_name          = "cpu_utilization_high"
-#   comparison_operator = "GreaterThanOrEqualToThreshold"
-#   evaluation_periods  = "2"
-#   metric_name         = "CPUUtilization"
-#   namespace           = "AWS/ECS"
-#   period              = "60"
-#   statistic           = "Average"
-#   threshold           = "85"
+resource "aws_cloudwatch_metric_alarm" "service_cpu_high" {
+  alarm_name          = "cpu_utilization_high"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/ECS"
+  period              = "60"
+  statistic           = "Average"
+  threshold           = "85"
 
-#   dimensions = {
-#     ClusterName = aws_ecs_cluster.main.name
-#     ServiceName = aws_ecs_service.main.name
-#   }
+  dimensions = {
+    ClusterName = aws_ecs_cluster.main.name
+    ServiceName = aws_ecs_service.main.name
+  }
 
-#   alarm_actions = [aws_appautoscaling_policy.up.arn]
-# }
+  alarm_actions = [aws_appautoscaling_policy.up.arn]
+}
 
-# CloudWatch alarm that triggers the autoscaling down policy
-# resource "aws_cloudwatch_metric_alarm" "service_cpu_low" {
-#   alarm_name          = "cb_cpu_utilization_low"
-#   comparison_operator = "LessThanOrEqualToThreshold"
-#   evaluation_periods  = "2"
-#   metric_name         = "CPUUtilization"
-#   namespace           = "AWS/ECS"
-#   period              = "60"
-#   statistic           = "Average"
-#   threshold           = "10"
+#CloudWatch alarm that triggers the autoscaling down policy
+resource "aws_cloudwatch_metric_alarm" "service_cpu_low" {
+  alarm_name          = "cb_cpu_utilization_low"
+  comparison_operator = "LessThanOrEqualToThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/ECS"
+  period              = "60"
+  statistic           = "Average"
+  threshold           = "10"
 
-#   dimensions = {
-#     ClusterName = aws_ecs_cluster.main.name
-#     ServiceName = aws_ecs_service.main.name
-#   }
+  dimensions = {
+    ClusterName = aws_ecs_cluster.main.name
+    ServiceName = aws_ecs_service.main.name
+  }
 
-#   alarm_actions = [aws_appautoscaling_policy.down.arn]
-# }
+  alarm_actions = [aws_appautoscaling_policy.down.arn]
+}
 # logs.tf
 
 # Set up CloudWatch group and log stream and retain logs for 30 days
 resource "aws_cloudwatch_log_group" "log_group" {
-  name              = "/ecs/demo-sortlog"
+  name              = "ecs/${var.stack}-sortlogloggroup-${var.app_env}"
   retention_in_days = 30
 
-  tags = {
-    Name = "demo-log-group"
-  }
+  # tags = {
+  #   Name = "demo-log-group"
+  # }
 }
 
-resource "aws_cloudwatch_log_stream" "log_stream" {
-  name           = "demo-log-stream"
-  log_group_name = aws_cloudwatch_log_group.log_group.name
-}
-
-# ############set up ECR #############
-# data "aws_ecr_repository" "sortlog" {
-#     name = "sortlog-ecs-terraform"
+# resource "aws_cloudwatch_log_stream" "log_stream" {
+#   name           = "demo-log-stream"
+#   log_group_name = aws_cloudwatch_log_group.log_group.name
 # }
+
+
 #####Create ECR repo##########
 resource "aws_ecr_repository" "sortlog" {
-  name                 = "sortlog"
+  name                 = "sortlog-${var.app_env}"
   image_tag_mutability = "MUTABLE"
-
   image_scanning_configuration {
-    scan_on_push = true
+    scan_on_push = false
   }
+  tags = {
+    Name = "${var.stack}-sortlog-${var.app_env}"
+  }
+
 }
 resource "aws_ecr_lifecycle_policy" "main" {
   repository = aws_ecr_repository.sortlog.name
@@ -479,4 +521,16 @@ resource "aws_ecr_lifecycle_policy" "main" {
      }
    }]
   })
+}
+#####Create DNS record for alb ##########
+resource "aws_route53_record" "backend" {
+  zone_id = "Z06225263LROS058F7FRE"//aws_route53_zone.main.zone_id////change 
+  name    =  var.backendurl//CName of CDN,var.url aws_cloudfront_distribution.s3_distribution.aliases cannotwork
+  type    = "A"
+
+  alias {
+    name                   = aws_alb.main.dns_name//aws_cloudfront_distribution.s3_distribution.domain_name
+    zone_id                = aws_alb.main.zone_id//aws_cloudfront_distribution.s3_distribution.hosted_zone_id
+    evaluate_target_health = false
+  }
 }
