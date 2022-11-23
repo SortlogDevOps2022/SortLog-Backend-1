@@ -1,3 +1,0 @@
-MONGO_URL=mongodb+srv://admin:admin@sortlog-dev.tz5kdhn.mongodb.net/sortlog-dev
-auth_encryption_salt=some-salt
-PORT=4000
