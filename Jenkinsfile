@@ -13,7 +13,7 @@ pipeline {
         {
             steps{
              echo "Installing packages"
-             sh 'npm install typescript -g'
+             sh 'sudo npm install typescript -g'
              sh 'yarn install'
              
              }
